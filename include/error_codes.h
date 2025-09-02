@@ -1,0 +1,17 @@
+#ifndef ERROR_CODES_H
+
+#define SUCCESS_CODE 0
+
+// LoadFile.h
+#define MAX_FILENAME_LEN 200
+#define ERR_FILENAME_LEN_EXCEED 101
+#define ERR_OPEN_FILE 102
+#define ERR_MALLOC 103
+#define ERR_READ_FILE 104
+#define ERR_SAVE_FILE_OPEN 151
+
+// MemMgt.h
+#define ERR_SAFE_ALLOC_MEM 301
+#define ERR_SAFE_CALLOC_MEM 302
+#define ERR_SAFE_REALLOC_MEM 303
+#endif  // ERROR_CODES_H
