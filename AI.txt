@@ -1,0 +1,181 @@
+Query
+In a parallel computing, if I have created a sequential code as a baseline, how can I record its performance to compare the code with parallel approach?
+
+Answer
+Thought for 39s
+Great question. Here’s a clean, reproducible way to record your sequential baseline so you can compare it fairly against your parallel version.
+1) Lock down the experiment
+Fix the workload & inputs. Same dataset(s), same random seed, same pre/post-processing. Save input hashes/checksums.
+Warm-up runs. Do one untimed run to warm caches/JIT (if any).
+Isolate measurement to the compute kernel. Exclude file I/O, data generation, logging, and one-time allocations.
+Control the machine. Prefer an exclusive node; pin threads/cores; set a fixed CPU frequency governor; avoid other processes.
+2) What to record (metadata)
+Hardware: CPU model, cores, SMT on/off, memory type/speed, NUMA layout.
+Software: OS, compiler & version, compile flags, math libraries (e.g., OpenBLAS/MKL), OpenMP runtime.
+Run config: problem size(s), number of repeats, thread/affinity settings, NUMA binding.
+A short example to keep alongside your results:
+machine=AMD EPYC 7543, 2×32 cores, SMT=on, 512 GB DDR4-3200
+compiler=gcc 13.2, flags="-O3 -march=native -fopenmp"
+dataset=N=100,000,000, seed=1234
+affinity=OMP_PROC_BIND=TRUE, OMP_PLACES=cores, numactl --interleave=all
+3) Timing correctly (sequential baseline)
+Use a monotonic wall clock with nanosecond resolution; measure multiple repeats and report median and MAD (or mean ± stdev).
+C/C++ (portable, no OpenMP required)
+#include <time.h>
+#include <stdio.h>
+#include <math.h>
+double now_s(void){
+  struct timespec ts; clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+  return ts.tv_sec + ts.tv_nsec*1e-9;
+}
+
+int main(){
+  const int repeats = 7;
+  double times[repeats];
+
+  // warm-up (not timed)
+  baseline_compute();  // run once to warm caches
+
+  for(int r=0;r<repeats;r++){
+    double t0 = now_s();
+    baseline_compute();            // your sequential kernel
+    double t1 = now_s();
+    times[r] = t1 - t0;
+  }
+
+  // simple stats (median)
+  // ... sort times[]; pick middle element
+  // print all times to CSV and compute stats offline, or compute here
+  for (int r=0;r<repeats;r++) printf("baseline_run_%d,%.6f\n", r, times[r]);
+}
+OpenMP timer (if you already link OpenMP)
+#include <omp.h>
+// ...
+double t0 = omp_get_wtime();
+baseline_compute();
+double t1 = omp_get_wtime();
+printf("baseline_seconds,%.6f\n", t1 - t0);
+Tips
+Turn off noisy logging inside the timed region.
+If allocation is part of the steady-state cost, include it; otherwise allocate outside the timer.
+For memory-bound codes, you may want cold-cache measurements too. A cheap trick: touch a buffer larger than LLC between repeats to evict cache.
+4) Verify correctness before comparing
+Always confirm the parallel result matches the sequential baseline:
+Exact (integers/bitwise): memcmp/checksums.
+Floating point: relative/absolute tolerance, e.g., |x_ref - x_par| ≤ max(ε_abs, ε_rel·|x_ref|); also compare aggregate metrics (sum, norm).
+5) Run enough repeats & summarize
+Run ≥5–10 repeats; report median (robust to outliers) and spread (MAD or stdev).
+Optional: 95% CI of the mean using a t-interval.
+Save raw results as CSV for both seq and parallel runs (append metadata as commented header).
+6) Compute comparison metrics
+For p threads (or p devices):
+Speedup: 
+S
+p
+=
+T
+1
+/
+T
+p
+S 
+p
+​	
+ =T 
+1
+​	
+ /T 
+p
+​	
+ 
+Parallel efficiency: 
+η
+p
+=
+S
+p
+/
+p
+η 
+p
+​	
+ =S 
+p
+​	
+ /p
+Karp–Flatt serial fraction (diagnostic):
+ε
+=
+1
+/
+S
+p
+−
+1
+/
+p
+1
+−
+1
+/
+p
+ε= 
+1−1/p
+1/S 
+p
+​	
+ −1/p
+​	
+ 
+Throughput (optional): items/s, FLOP/s, GB/s (helps tie to a Roofline).
+7) Automate runs (example: OpenMP strong scaling)
+#!/usr/bin/env bash
+set -eu
+prog=./my_app
+N=100000000
+REPEATS=7
+
+echo "#host=$(hostname) date=$(date -Is) N=$N compiler=gcc13 flags='-O3 -march=native -fopenmp'"
+echo "mode,threads,run,seconds"
+
+# sequential baseline (force 1 thread / or separate baseline binary)
+for r in $(seq 1 $REPEATS); do
+  OMP_NUM_THREADS=1 OMP_PROC_BIND=TRUE OMP_PLACES=cores \
+  $prog --size $N --mode baseline | tee /dev/stderr | \
+  awk -F, '/baseline_seconds/{print "seq,1," ENVIRON["r"] "," $2}'
+done
+
+# parallel runs
+for t in 2 4 8 16 32; do
+  for r in $(seq 1 $REPEATS); do
+    OMP_NUM_THREADS=$t OMP_PROC_BIND=TRUE OMP_PLACES=cores \
+    $prog --size $N --mode parallel | \
+    awk -F, -v t=$t -v r=$r '/parallel_seconds/{print "par," t "," r "," $2}'
+  done
+done
+8) Cluster specifics (SLURM/NUMA)
+Request an exclusive node: --exclusive.
+Match threads to cores: --cpus-per-task and OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK.
+Pinning & placement:
+export OMP_PROC_BIND=TRUE
+export OMP_PLACES=cores (or threads if using SMT)
+For NUMA: numactl --cpunodebind=0 --membind=0 (or --interleave=all for bandwidth tests).
+Record SLURM allocation in your metadata (SLURM_JOB_ID, node list).
+9) Optional deeper instrumentation
+perf: perf stat -r 5 -d -- $prog ... (cycles, instructions, LLC misses, branches).
+PAPI / LIKWID: hardware counters per region.
+VTune / Nsight / perfetto: for hotspots & roofline.
+Memory bandwidth sanity check: run STREAM to bound expectations.
+10) Reporting template (keep it simple)
+Environment: hardware, software, flags, binding.
+Problem sizes: N list.
+Results: table with median times, speedup, efficiency.
+Notes: any deviations (turbo off, SMT off, NUMA policy, etc.).
+Example snippet in your paper/report:
+Problem: 1e8 elements, int32 prefix-sum
+Baseline (1 thread): 2.84 s  [median of 7]
+Parallel (16 threads): 0.22 s [median of 7]
+Speedup S16 = 12.9×, Efficiency η16 = 80.6%
+Karp–Flatt ε = 0.016
+Node exclusive; OMP_PROC_BIND=TRUE; OMP_PLACES=cores; gcc 13.2 -O3 -march=native
+If you want, tell me your language/toolchain (C/OpenMP? C++/TBB? CUDA? Python/numba?) and I’ll drop in a tailored timing harness and a ready-to-use CSV/plot script.

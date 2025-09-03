@@ -5,21 +5,103 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h> // for isalnum
+#include <ctype.h>  // for isalnum
+#include <omp.h>
 
-// Insertion sort implementation
-static void insertion_sort(char **a, size_t n) {
-    for (size_t i = 1; i < n; ++i) {
-        char *key = a[i];
+// baseline 0.019s
+
+/* Insertion Sort
+ * O(n^2) time complexity -- 18s
+ */
+static void insertion_sort(char **array, size_t count) {
+    for (size_t i = 1; i < count; ++i) {
+        char *key = array[i];
         size_t j = i;
-        while (j > 0 && strcmp(a[j-1], key) > 0) {
-            a[j] = a[j-1];
+        while (j > 0 && strcmp(array[j-1], key) > 0) {
+            array[j] = array[j-1];
             --j;
         }
-        a[j] = key;
+        array[j] = key;
     }
 }
 
+/* Quick Sort
+ * Average O(n log n) time complexity
+ * Sequential Experiment Result: 0.3s
+ * Parallel Experiment Result: 0.15s
+ */
+
+// TODO(tzuyu): pivot -- mdedian of three
+// TODO(tzuyu): insertion sort for small arrays
+
+// Sequential quick sort
+static void swap_a_b(char** a, char** b) {
+  char* temp = *a;
+  *a = *b;
+  *b = temp;
+}
+static int partition_left_right(char** words, int left, int right) {
+  char* pivot = words[right];
+
+  int idx = left;
+  for (int i = left; i < right; i++) {
+    int ret = strcmp(words[i], pivot);
+    if (ret < 0) {
+      swap_a_b(&words[idx], &words[i]);
+      ++idx;
+      continue;
+    }
+  }
+
+  swap_a_b(&words[idx], &words[right]);
+  return idx;
+}
+// quick sort
+static void quick_sort(char **words, int left, int right) {
+  if (left < right) {
+    int partition_index = partition_left_right(words, left, right);
+    quick_sort(words, left, partition_index - 1);
+    quick_sort(words, partition_index + 1, right);
+  }
+}
+// quick sort word array
+static void quick_sort_words(char** array, size_t count) {
+  if (count <= 1) return;
+  quick_sort(array, 0, count - 1);
+}
+
+// quick sort in parallel
+static void parallel_quick_sort(char** array, int left, int right, int threadhold) {
+  if (left < right) {
+    if (right - left < threadhold) {
+      quick_sort(array, left, right);
+    } else {
+      int partition_index = partition_left_right(array, left, right);
+      #pragma omp task shared(array)
+      parallel_quick_sort(array, left, partition_index - 1, threadhold);
+      #pragma omp task shared(array)
+      parallel_quick_sort(array, partition_index + 1, right, threadhold);
+      #pragma omp taskwait
+    }
+  }
+}
+static void parallel_quick_sort_words(char** array, size_t count) {
+  if (count <= 1) return;
+  int threadhold = 50000; // sequential threshold (consider dynamically adjust based on count number)
+  // Start()
+  #pragma omp parallel  // ThreadPoolInit(pool)
+  {
+    #pragma omp single nowait
+    {
+      parallel_quick_sort(array, 0, count - 1, threadhold);
+    }
+  }
+}
+
+//TODO(tzuyu): try merge sort in parallel
+
+// TODO(tzuyu): [prefix sum] remove duplicates in parallel
+// TODO(tzuyu): [prefix sum] malloc memory
 void WordList(char** doc, uint32_t doc_len, char*** words, uint32_t* count) {
   /**
    * Version: 1.0.0
@@ -34,24 +116,12 @@ void WordList(char** doc, uint32_t doc_len, char*** words, uint32_t* count) {
   // Feel free to remove the dummy implementation below.
   //////////////////////////////////////////////////////////////
 
-  // (a) take a pointer doc to a nul-terminated ASCII string and its length, doc len;
   if (words) *words = NULL;
   if (count) *count = 0;
       
   if (*doc == NULL || doc_len == 0) {
     return;
   }
-
-  // (b) parse the string into a list of words, where a word is defined as a
-  // maximal string of characters that are ASCII letter type, as determined by isalnum.
-  // That is, it is a string of ASCII letters that
-  //    • is either preceded by a non-letter or starts at the start of the string; and
-  //    • is either followed by a non-letter or ends at the end of the string;
-  // The function should malloc two regions of memory:
-  //    one containing all of the ('\0'-terminated) words contiguously, and
-  //    the other containing a list of pointers to the starts of words within the first region.
-  // A pointer to the second should be returned in words.
-  // The memory should be able to be freed by free (*words); The original string doc may be modified.
 
   size_t word_count = 0;
   int in_word = 0;
@@ -89,9 +159,9 @@ void WordList(char** doc, uint32_t doc_len, char*** words, uint32_t* count) {
     }
   }
 
-  // (c) set *count to the number of distinct words.
-  // Sort the words using insertion sort
-  insertion_sort(word_array, word_count);
+  // insertion_sort(word_array, word_count);
+  // quick_sort_words(word_array, word_count);
+  parallel_quick_sort_words(word_array, word_count);
 
   // Remove duplicates
   uint32_t unique_count = 1;  // At least one word exists
@@ -127,54 +197,4 @@ void WordList(char** doc, uint32_t doc_len, char*** words, uint32_t* count) {
   free(word_array);
   *words = out;
   *count = unique_count;
-
-
-  // Input: *doc = "finding grapes@\0, a big cat <[``]> danced elegantly!a"
-  // There are 7 unique words in the doc
-  // *count = 7;
-  // *words = (char**)malloc((*count) * sizeof(char*));
-  // if (*words == NULL) {
-  //   fprintf(stderr, "Memory allocation failed for words pointers.\n");
-  //   exit(ERR_SAFE_ALLOC_MEM);
-  // }
-
-  // doc: "finding grapes@\0, a big cat <[``]> danced elegantly!a"
-  // -> : "finding\0grapes\0\0, a\0big\0cat\0<[``]>\0danced\0elegantly\0a";
-  // (*doc)[7] = '\0';
-  // (*doc)[14] = '\0';
-  // (*doc)[19] = '\0';
-  // (*doc)[23] = '\0';
-  // (*doc)[27] = '\0';
-  // (*doc)[41] = '\0';
-  // (*doc)[51] = '\0';
-  // (*words)[0] = *doc + 18;  // point to first word `a`
-  // (*words)[1] = *doc + 20;  // point to second word `big`
-  // (*words)[2] = *doc + 24;  // point to third word `cat`
-  // (*words)[3] = *doc + 35;  // point to fourth word `danced`
-  // (*words)[4] = *doc + 42;  // point to fifth word `elegantly`
-  // (*words)[5] = *doc + 0;   // point to sixth word `finding`
-  // (*words)[6] = *doc + 8;   // point to seventh word `grapes`
-  //  *  doc: "finding\0grapes\0\0, a\0big\0cat\0<[``]> danced\0elegantly\0a"
-  //  *         \        \         /  /    /           /       /
-  //  *            \        \     /  /    /           /       /
-  //  *              \        \  /  /    /           /       /
-  //  *                \       \/  /    /           /       /
-  //  *                  \     / \/    /           /       /
-  //  *                     \ /  / \  /           /       /
-  //  *                      /\ /   \/           /       /
-  //  *                     /  /\   /  \        /       /
-  //  *                    /  /  \ /     \     /       /
-  //  *                   /  /    /\       \  /       /
-  //  *                  /  /    /   \      \/       /
-  //  *                 /  /    /      \    / \     /
-  //  *                /  /    /         \ /    \  /
-  //  *               /  /    /           /\     \/
-  //  *              /  /    /           /  \    / \
-  //  *             /  /    /           /     \ /   \
-  //  *            /  /    /           /       /\     \
-  //  *           /  /    /           /       /  \     \
-  //   words:    [0][1]  [2]         [3]     [4] [5]   [6]
-  //  *           a  big  cat         danced  elegantly finding grapes
-
-  // Note that *words will be freed outside this function.
 }
