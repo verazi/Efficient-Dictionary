@@ -1,1 +1,0 @@
-finding grapes@\0, a big cat <[``]> danced elegantly!a --module-path lib --add-modules javafx.controls,javafx.fxml -jar client/DictionaryClient.jar
