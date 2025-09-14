@@ -1,7 +1,7 @@
 #!/usr/bin/bash
 
 #SBATCH --job-name=sort-unique-words-experiment
-#SBATCH --time=00:10:00
+#SBATCH --time=00:20:00
 #SBATCH --cpus-per-task=1
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
@@ -9,6 +9,9 @@
 #SBATCH --partition=sapphire
 #SBATCH --output=logs/sort-unique-words-experiment.%j.out
 #SBATCH --error=logs/sort-unique-words-experiment.%j.err
+
+export OMP_STACKSIZE=512M
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 #### You only need to edit the above redacted lines to use this slurm file ####
 #### However, feel free to use your own slurm file if you prefer ##############

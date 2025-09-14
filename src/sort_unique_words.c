@@ -29,14 +29,13 @@ static void insertion_sort(char **array, size_t count) {
 
 /* Quick Sort
  * Average O(n log n) time complexity
- * Sequential Experiment Result: 0.30s
- * Parallel Experiment Result:
- *    (1) Sequential partition: 0.15s
- *    (2) Parallel partition
+ * Sequential quick sorting
+ * Sequential partitioning
+ * Parallel partitioning
  */
 
 
-// Basic quick sort
+// Sequential quick sorting
 static void swap_words(char** a, char** b) {
   char* temp = *a;
   *a = *b;
@@ -68,8 +67,7 @@ static void quick_sort_words(char** array, size_t count) {
   quick_sort_recursive(array, 0, count - 1);
 }
 
-// Parallel quick sort
-// with sequential partition
+// Parallel quick sort with sequential partition
 static int seq_pivot_select(char** words, int left, int right) {
   int mid = left + ((right - left) / 2);
 
@@ -124,7 +122,8 @@ static void quick_sort_words_parallel(char** array, size_t count) {
   }
 }
 
-// Parallel partitioning
+// Parallel quick sort with parallel partition
+// 1. Pivot Selection
 static char* par_pivot_select(char** words, int left, int right) {
   int mid = left + ((right - left) >> 1);
 
@@ -330,9 +329,9 @@ void WordList(char** doc, uint32_t doc_len, char*** words, uint32_t* count) {
   double t1 = omp_get_wtime();
 
   // insertion_sort(word_array, word_count);
-  // quick_sort_words(word_array, word_count);
+  quick_sort_words(word_array, word_count);
   // quick_sort_words_parallel(word_array, word_count);
-  quicksort_parallel(&word_array, word_count);
+  // quicksort_parallel(&word_array, word_count);
 
   // Unique
   double t2 = omp_get_wtime();
